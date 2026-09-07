@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Appraisal" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#1E2A38" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+<title>Stock Appraisal</title>
+<style>
+  html, body, #root { height: 100%; margin: 0; }
+  body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/plain" id="app-source">
+const { useState } = React;
+
+const INK = '#1E2A38';
+const INK_SOFT = '#4A5A6B';
+const PAPER = '#F0ECDF';
+const PAPER_CARD = '#FAF8F1';
+const LINE = '#D8D0B8';
+const BRASS = '#9C7A3C';
+const BRASS_DEEP = '#7C5F2C';
+const TEAL = '#3F6E63';
+const RUST = '#9C4A33';
+
+const STEP_TITLES = ['Profitable?', 'Price check', 'Growth-adjusted', 'Real growth?', 'Moat?', 'Priced in?', 'Appraisal'];
+
+function toNum(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+function fmtPct(n, digits = 1) {
+  if (n === null) return '—';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(digits)}%`;
+}
+
+function Field({ label, value, onChange, placeholder, suffix, type = 'text' }) {
+  return (
+    <label className="fp-field">
+      <span className="fp-field-label">{label}</span>
+      <div className="fp-field-input-row">
+        <input
+          className="fp-input"
+          type={type}
+          inputMode={type === 'number' ? 'decimal' : undefined}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+        {suffix && <span className="fp-field-suffix">{suffix}</span>}
+      </div>
+    </label>
+  );
+}
+
+function Chip({ label, active, onClick }) {
+  return (
+    <button type="button" className={`fp-chip ${active ? 'fp-chip-active' : ''}`} onClick={onClick}>
+      {active && <span style={{ marginRight: 5 }}>✓</span>}
+      {label}
+    </button>
+  );
+}
+
+function Readout({ tone = 'neutral', children }) {
+  return <div className={`fp-readout fp-readout-${tone}`}>{children}</div>;
+}
+
+function Stamp({ label, tone = 'neutral', rotate = -4 }) {
+  return (
+    <div className={`fp-stamp fp-stamp-${tone}`} style={{ transform: `rotate(${rotate}deg)` }}>
+      {label}
+    </div>
+  );
+}
+
+function Blurb({ children }) {
+  return <p className="fp-blurb">{children}</p>;
+}
+
+function StockAppraisal() {
+  const [step, setStep] = useState(0);
+  const [ticker, setTicker] = useState('');
+  const [eps, setEps] = useState('');
+  const [pe, setPe] = useState('');
+  const [marketPe, setMarketPe] = useState('20');
+  const [ownHistPe, setOwnHistPe] = useState('');
+  const [peerPe, setPeerPe] = useState('');
+  const [growth, setGrowth] = useState('');
+  const [growthFlags, setGrowthFlags] = useState({ lowBase: false, oneTime: false, structural: false, trend: false });
+  const [moatFlags, setMoatFlags] = useState({ network: false, switching: false, brand: false, cost: false, scale: false });
+  const [marginYears, setMarginYears] = useState('');
+  const [price, setPrice] = useState('');
+  const [low52, setLow52] = useState('');
+  const [high52, setHigh52] = useState('');
+  const [newsHappened, setNewsHappened] = useState(null);
+  const [priceDate, setPriceDate] = useState('');
+  const [newsDate, setNewsDate] = useState('');
+
+  const epsNum = toNum(eps);
+  const isProfitable = epsNum !== null ? epsNum > 0 : null;
+
+  const peNum = toNum(pe);
+  const marketPeNum = toNum(marketPe);
+  const ownHistPeNum = toNum(ownHistPe);
+  const peerPeNum = toNum(peerPe);
+
+  const vsMarket = peNum !== null && marketPeNum ? ((peNum - marketPeNum) / marketPeNum) * 100 : null;
+  const vsOwn = peNum !== null && ownHistPeNum ? ((peNum - ownHistPeNum) / ownHistPeNum) * 100 : null;
+  const vsPeer = peNum !== null && peerPeNum ? ((peNum - peerPeNum) / peerPeNum) * 100 : null;
+
+  const growthNum = toNum(growth);
+  const peg = peNum !== null && growthNum ? peNum / growthNum : null;
+  const pegTone = peg === null ? 'neutral' : peg < 1 ? 'good' : peg <= 2 ? 'neutral' : 'caution';
+  const pegLabel =
+    peg === null ? 'Enter a P/E and a growth rate to see this' :
+    peg < 1 ? 'Cheap for its growth' :
+    peg <= 2 ? 'Reasonable for its growth' : 'Pricey for its growth';
+
+  const cautionFlags = growthFlags.lowBase || growthFlags.oneTime;
+  const durabilityFlags = growthFlags.structural || growthFlags.trend;
+  const anyGrowthFlag = cautionFlags || durabilityFlags;
+  const growthTone = !anyGrowthFlag ? 'neutral' : (cautionFlags && !durabilityFlags) ? 'caution' : (durabilityFlags && !cautionFlags) ? 'good' : 'neutral';
+  const growthVerdict =
+    !anyGrowthFlag ? 'Not assessed yet — check a box below' :
+    (cautionFlags && !durabilityFlags) ? 'Treat this growth number with caution' :
+    (durabilityFlags && !cautionFlags) ? 'Looks like a more durable growth story' : 'Mixed signals — dig a little further';
+
+  const moatCount = Object.values(moatFlags).filter(Boolean).length;
+  const marginYearsNum = toNum(marginYears) || 0;
+  let moatStrength = 'No obvious moat';
+  let moatTone = 'caution';
+  if (moatCount >= 3 && marginYearsNum >= 5) { moatStrength = 'Strong moat'; moatTone = 'good'; }
+  else if (moatCount >= 1 && marginYearsNum >= 5) { moatStrength = 'Moderate moat'; moatTone = 'good'; }
+  else if (moatCount >= 1) { moatStrength = 'Possible moat — still unproven'; moatTone = 'neutral'; }
+
+  const priceNum = toNum(price);
+  const low52Num = toNum(low52);
+  const high52Num = toNum(high52);
+  const rangePct = (priceNum !== null && low52Num !== null && high52Num !== null && high52Num !== low52Num)
+    ? clamp(((priceNum - low52Num) / (high52Num - low52Num)) * 100, 0, 100) : null;
+  const rangeLabel = rangePct === null ? null :
+    rangePct >= 85 ? 'Near the 52-week high' :
+    rangePct <= 15 ? 'Near the 52-week low' : 'Middle of its range';
+
+  let pricedInVerdict = null;
+  if (newsHappened === 'yes') {
+    if (priceDate && newsDate) {
+      pricedInVerdict = newsDate <= priceDate ? 'Already priced in' : 'Not yet reflected in this price';
+    } else {
+      pricedInVerdict = 'Add both dates to check';
+    }
+  } else if (newsHappened === 'no') {
+    pricedInVerdict = 'Nothing major to price in yet';
+  }
+
+  const goNext = () => setStep((s) => Math.min(6, s + 1));
+  const goBack = () => setStep((s) => Math.max(0, s - 1));
+  const resetAll = () => {
+    setStep(0); setTicker(''); setEps(''); setPe(''); setMarketPe('20'); setOwnHistPe(''); setPeerPe('');
+    setGrowth(''); setGrowthFlags({ lowBase: false, oneTime: false, structural: false, trend: false });
+    setMoatFlags({ network: false, switching: false, brand: false, cost: false, scale: false });
+    setMarginYears(''); setPrice(''); setLow52(''); setHigh52('');
+    setNewsHappened(null); setPriceDate(''); setNewsDate('');
+  };
+
+  const renderStep = () => {
+    switch (step) {
+      case 0:
+        return (
+          <>
+            <h2 className="fp-h2">Does it actually make money?</h2>
+            <Blurb>If there's no profit, there's nothing for a P/E to divide into — like grading a test nobody took yet.</Blurb>
+            <Field label="EPS (trailing, most recent 12 months)" value={eps} onChange={setEps} placeholder="e.g. 20.57" type="number" suffix="$" />
+            {epsNum !== null && (
+              <Readout tone={isProfitable ? 'good' : 'caution'}>
+                {isProfitable ? 'Profitable — the multiples in the next steps will mean something.' : "Not profitable — P/E is meaningless here. This is a pipeline or cash-runway case, not a multiples case."}
+              </Readout>
+            )}
+          </>
+        );
+      case 1:
+        return (
+          <>
+            <h2 className="fp-h2">How does its price compare?</h2>
+            <Blurb>A P/E means nothing alone. It only tells you something next to the market, its own history, or a peer.</Blurb>
+            <Field label="Forward P/E" value={pe} onChange={setPe} placeholder="e.g. 20.3" type="number" suffix="×" />
+            <Field label="Overall market average" value={marketPe} onChange={setMarketPe} placeholder="20" type="number" suffix="×" />
+            <Field label="This stock's own historical average (optional)" value={ownHistPe} onChange={setOwnHistPe} placeholder="e.g. 27" type="number" suffix="×" />
+            <Field label="Closest peer's P/E (optional)" value={peerPe} onChange={setPeerPe} placeholder="optional" type="number" suffix="×" />
+            {(vsMarket !== null || vsOwn !== null || vsPeer !== null) && (
+              <Readout tone="neutral">
+                <div className="fp-compare-row"><span>vs. market</span><strong>{fmtPct(vsMarket)}</strong></div>
+                {ownHistPeNum ? <div className="fp-compare-row"><span>vs. own history</span><strong>{fmtPct(vsOwn)}</strong></div> : null}
+                {peerPeNum ? <div className="fp-compare-row"><span>vs. peer</span><strong>{fmtPct(vsPeer)}</strong></div> : null}
+              </Readout>
+            )}
+          </>
+        );
+      case 2:
+        return (
+          <>
+            <h2 className="fp-h2">Does the price make sense for its growth?</h2>
+            <Blurb>A high P/E can be earned by fast enough growth. The PEG ratio checks whether it's actually earning it.</Blurb>
+            <Field label="Expected earnings growth" value={growth} onChange={setGrowth} placeholder="e.g. 77.23" type="number" suffix="%" />
+            <Readout tone={pegTone}>
+              <div className="fp-compare-row"><span>PEG (P/E ÷ growth)</span><strong>{peg === null ? '—' : peg.toFixed(2)}</strong></div>
+              <div style={{ marginTop: 6 }}>{pegLabel}</div>
+            </Readout>
+          </>
+        );
+      case 3:
+        return (
+          <>
+            <h2 className="fp-h2">Is that growth number real?</h2>
+            <Blurb>Big growth figures do most of the talking in a valuation. Make sure they're saying something true.</Blurb>
+            <div className="fp-chip-row">
+              <Chip label="Off a weak prior-year base" active={growthFlags.lowBase} onClick={() => setGrowthFlags((f) => ({ ...f, lowBase: !f.lowBase }))} />
+              <Chip label="Includes a one-time item" active={growthFlags.oneTime} onClick={() => setGrowthFlags((f) => ({ ...f, oneTime: !f.oneTime }))} />
+              <Chip label="Genuine structural shift" active={growthFlags.structural} onClick={() => setGrowthFlags((f) => ({ ...f, structural: !f.structural }))} />
+              <Chip label="Consistent multi-year trend" active={growthFlags.trend} onClick={() => setGrowthFlags((f) => ({ ...f, trend: !f.trend }))} />
+            </div>
+            <Readout tone={growthTone}>{growthVerdict}</Readout>
+          </>
+        );
+      case 4:
+        return (
+          <>
+            <h2 className="fp-h2">Does it have a moat?</h2>
+            <Blurb>A moat is what stops today's profits from getting competed away tomorrow.</Blurb>
+            <div className="fp-chip-row">
+              <Chip label="Network effects" active={moatFlags.network} onClick={() => setMoatFlags((f) => ({ ...f, network: !f.network }))} />
+              <Chip label="High switching costs" active={moatFlags.switching} onClick={() => setMoatFlags((f) => ({ ...f, switching: !f.switching }))} />
+              <Chip label="Brand / patents / IP" active={moatFlags.brand} onClick={() => setMoatFlags((f) => ({ ...f, brand: !f.brand }))} />
+              <Chip label="Cost advantage from scale" active={moatFlags.cost} onClick={() => setMoatFlags((f) => ({ ...f, cost: !f.cost }))} />
+              <Chip label="Efficient scale" active={moatFlags.scale} onClick={() => setMoatFlags((f) => ({ ...f, scale: !f.scale }))} />
+            </div>
+            <Field label="Years of consistently high margins / ROIC" value={marginYears} onChange={setMarginYears} placeholder="e.g. 10" type="number" suffix="yrs" />
+            <Readout tone={moatTone}>{moatStrength}</Readout>
+          </>
+        );
+      case 5:
+        return (
+          <>
+            <h2 className="fp-h2">What does the market already know?</h2>
+            <Blurb>The market has almost certainly reacted to yesterday's news. The real question is what's left to react to.</Blurb>
+            <Field label="Current price" value={price} onChange={setPrice} placeholder="e.g. 342.48" type="number" suffix="$" />
+            <Field label="52-week low" value={low52} onChange={setLow52} placeholder="e.g. 226.11" type="number" suffix="$" />
+            <Field label="52-week high" value={high52} onChange={setHigh52} placeholder="e.g. 408.61" type="number" suffix="$" />
+            {rangePct !== null && (
+              <div className="fp-range">
+                <div className="fp-range-track"><div className="fp-range-dot" style={{ left: `${rangePct}%` }} /></div>
+                <div className="fp-range-labels"><span>Low</span><span>{rangeLabel}</span><span>High</span></div>
+              </div>
+            )}
+            <div className="fp-divider" />
+            <span className="fp-field-label" style={{ marginBottom: 8, display: 'block' }}>Did major news just happen? (earnings, approval, guidance…)</span>
+            <div className="fp-chip-row">
+              <Chip label="Yes" active={newsHappened === 'yes'} onClick={() => setNewsHappened('yes')} />
+              <Chip label="No" active={newsHappened === 'no'} onClick={() => setNewsHappened('no')} />
+            </div>
+            {newsHappened === 'yes' && (
+              <>
+                <Field label="Date of this price / quote" value={priceDate} onChange={setPriceDate} type="date" />
+                <Field label="Date the news happened" value={newsDate} onChange={setNewsDate} type="date" />
+              </>
+            )}
+            {pricedInVerdict && <Readout tone="neutral">{pricedInVerdict}</Readout>}
+          </>
+        );
+      case 6:
+        return (
+          <>
+            <h2 className="fp-h2">Your appraisal{ticker ? ` — ${ticker.toUpperCase()}` : ''}</h2>
+            <Blurb>Six checks, six stamps. This is a way of thinking about the price, not a verdict to trade on.</Blurb>
+            <div className="fp-stamp-grid">
+              <Stamp rotate={-3} tone={isProfitable === null ? 'neutral' : isProfitable ? 'good' : 'caution'} label={isProfitable === null ? 'Not assessed' : isProfitable ? 'Profitable' : 'Pre-profit'} />
+              <Stamp rotate={2} tone="neutral" label={vsMarket === null ? 'Not assessed' : Math.abs(vsMarket) <= 5 ? 'In line with market' : vsMarket > 0 ? 'Above market' : 'Below market'} />
+              <Stamp rotate={-2} tone={pegTone} label={peg === null ? 'Not assessed' : pegLabel} />
+              <Stamp rotate={3} tone={growthTone} label={!anyGrowthFlag ? 'Not assessed' : growthVerdict} />
+              <Stamp rotate={-4} tone={moatTone} label={moatStrength} />
+              <Stamp rotate={2} tone="neutral" label={rangeLabel || 'Not assessed'} />
+            </div>
+            {pricedInVerdict && <Readout tone="neutral">{pricedInVerdict}</Readout>}
+            <div className="fp-divider" />
+            <p className="fp-footnote">This is a framework for thinking through a price — not a recommendation to buy or sell. Not financial advice.</p>
+            <button className="fp-reset" onClick={resetAll}><span style={{ marginRight: 6 }}>↺</span>Start a new appraisal</button>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="fp-root">
+      <div className="fp-shell">
+        <h1 className="fp-title">Stock appraisal</h1>
+        <p className="fp-subtitle">Run any ticker through the six checks — one page at a time.</p>
+        <div className="fp-case-row">
+          <span className="fp-case-label">Appraisal for</span>
+          <input className="fp-case-input" value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="ticker or company name" />
+        </div>
+        <div className="fp-pills">
+          {STEP_TITLES.map((t, i) => (
+            <button key={t} className={`fp-pill ${i === step ? 'fp-pill-active' : i < step ? 'fp-pill-done' : ''}`} onClick={() => setStep(i)} aria-label={t} title={t} />
+          ))}
+        </div>
+        <div className="fp-card">
+          {renderStep()}
+          <div className="fp-nav">
+            <button className="fp-btn fp-btn-ghost" onClick={goBack} disabled={step === 0}><span style={{ marginRight: 5 }}>←</span>Back</button>
+            {step < 6 ? (
+              <button className="fp-btn fp-btn-primary" onClick={goNext}>Next<span style={{ marginLeft: 5 }}>→</span></button>
+            ) : <span />}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<StockAppraisal />);
+</script>
+
+<script>
+  (function () {
+    var source = document.getElementById('app-source').textContent;
+    var output = Babel.transform(source, {
+      presets: [['react', { runtime: 'classic' }]],
+    }).code;
+    (0, eval)(output);
+  })();
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
+</script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Work+Sans:wght@400;500;600&display=swap');
+  .fp-root { font-family: 'Work Sans', sans-serif; background: #F0ECDF; color: #1E2A38; min-height: 100vh; padding: 28px 16px 40px; box-sizing: border-box; }
+  .fp-root * { box-sizing: border-box; }
+  .fp-shell { max-width: 560px; margin: 0 auto; }
+  .fp-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 1.9rem; letter-spacing: -0.01em; margin: 0 0 4px; }
+  .fp-subtitle { font-size: 0.9rem; color: #4A5A6B; margin: 0 0 20px; }
+  .fp-case-row { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px solid #D8D0B8; }
+  .fp-case-label { font-size: 0.78rem; color: #4A5A6B; white-space: nowrap; }
+  .fp-case-input { flex: 1; border: none; border-bottom: 1px dashed #D8D0B8; background: transparent; font-family: 'Fraunces', serif; font-size: 1.05rem; color: #1E2A38; padding: 2px 4px; outline: none; }
+  .fp-case-input:focus { border-bottom-color: #9C7A3C; }
+  .fp-pills { display: flex; gap: 6px; margin-bottom: 24px; }
+  .fp-pill { flex: 1; height: 4px; border-radius: 2px; background: #D8D0B8; border: none; padding: 0; cursor: pointer; }
+  .fp-pill-active { background: #9C7A3C; }
+  .fp-pill-done { background: #4A5A6B; }
+  .fp-card { background: #FAF8F1; border: 1px solid #D8D0B8; border-radius: 6px; padding: 26px 22px; box-shadow: 0 1px 2px rgba(30,42,56,0.05), 0 10px 24px rgba(30,42,56,0.06); }
+  .fp-h2 { font-family: 'Fraunces', serif; font-weight: 500; font-size: 1.35rem; margin: 0 0 8px; }
+  .fp-blurb { font-size: 0.9rem; line-height: 1.5; color: #4A5A6B; margin: 0 0 20px; }
+  .fp-field { display: block; margin-bottom: 16px; }
+  .fp-field-label { font-size: 0.8rem; color: #4A5A6B; margin-bottom: 5px; display: block; }
+  .fp-field-input-row { display: flex; align-items: center; border-bottom: 1.5px solid #D8D0B8; transition: border-color 0.15s; }
+  .fp-field-input-row:focus-within { border-bottom-color: #9C7A3C; }
+  .fp-input { flex: 1; border: none; background: transparent; font-family: 'Work Sans', sans-serif; font-size: 1.05rem; font-variant-numeric: tabular-nums; color: #1E2A38; padding: 7px 2px; outline: none; min-width: 0; }
+  .fp-field-suffix { font-size: 0.85rem; color: #4A5A6B; padding-left: 6px; }
+  .fp-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .fp-chip { font-family: 'Work Sans', sans-serif; font-size: 0.82rem; padding: 7px 13px; border-radius: 16px; border: 1.3px solid #D8D0B8; background: transparent; color: #4A5A6B; cursor: pointer; display: inline-flex; align-items: center; transition: all 0.12s; }
+  .fp-chip-active { border-color: #7C5F2C; background: #9C7A3C; color: #fff; }
+  .fp-readout { font-size: 0.92rem; line-height: 1.5; padding: 14px 16px; border-radius: 5px; border-left: 3px solid #4A5A6B; background: #F0ECDF; margin-top: 4px; }
+  .fp-readout-good { border-left-color: #3F6E63; }
+  .fp-readout-caution { border-left-color: #9C4A33; }
+  .fp-compare-row { display: flex; justify-content: space-between; padding: 2px 0; font-variant-numeric: tabular-nums; }
+  .fp-range { margin: 4px 0 18px; }
+  .fp-range-track { position: relative; height: 6px; border-radius: 3px; background: #D8D0B8; margin-bottom: 8px; }
+  .fp-range-dot { position: absolute; top: 50%; width: 14px; height: 14px; border-radius: 50%; background: #9C7A3C; border: 2px solid #FAF8F1; transform: translate(-50%, -50%); }
+  .fp-range-labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: #4A5A6B; }
+  .fp-divider { height: 1px; background: #D8D0B8; margin: 20px 0; }
+  .fp-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 22px; }
+  .fp-btn { font-family: 'Work Sans', sans-serif; font-size: 0.88rem; font-weight: 500; padding: 9px 16px; border-radius: 5px; border: 1.3px solid #1E2A38; background: transparent; color: #1E2A38; cursor: pointer; display: inline-flex; align-items: center; }
+  .fp-btn-primary { background: #1E2A38; color: #fff; border-color: #1E2A38; }
+  .fp-btn:disabled { opacity: 0.35; cursor: default; }
+  .fp-btn-ghost { border-color: transparent; padding-left: 4px; padding-right: 4px; }
+  .fp-stamp-grid { display: flex; flex-wrap: wrap; gap: 14px; margin: 4px 0 18px; }
+  .fp-stamp { font-family: 'Fraunces', serif; font-weight: 600; font-size: 0.78rem; letter-spacing: 0.02em; padding: 9px 14px; border: 2px solid #1E2A38; border-radius: 3px; color: #1E2A38; white-space: nowrap; }
+  .fp-stamp-good { border-color: #3F6E63; color: #3F6E63; }
+  .fp-stamp-caution { border-color: #9C4A33; color: #9C4A33; }
+  .fp-footnote { font-size: 0.8rem; color: #4A5A6B; line-height: 1.5; margin: 0 0 18px; }
+  .fp-reset { font-family: 'Work Sans', sans-serif; font-size: 0.85rem; color: #4A5A6B; background: transparent; border: none; cursor: pointer; display: inline-flex; align-items: center; padding: 0; }
+</style>
+</body>
+</html>
